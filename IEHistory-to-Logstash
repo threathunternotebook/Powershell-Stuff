@@ -1,0 +1,55 @@
+*****Grab IE History. Send to Logstash*****
+
+Function Send-JsonOverTcp { 
+ param ( [ValidateNotNullOrEmpty()] 
+ [string] $LogstashServer, 
+ [int] $Port, 
+ $JsonObject) 
+ $JsonString = $JsonObject -replace "`n",' ' -replace "`r",' ' -replace ' ',''
+ $Ip = [System.Net.Dns]::GetHostAddresses($LogstashServer) 
+ $Address = [System.Net.IPAddress]::Parse($Ip) 
+ $Socket = New-Object System.Net.Sockets.TCPClient($Address,$Port) 
+ $Stream = $Socket.GetStream() 
+ $Writer = New-Object System.IO.StreamWriter($Stream)
+ $Writer.WriteLine($JsonString)
+ $Writer.Flush()
+ $Stream.Close()
+ $Socket.Close()
+}
+
+$Null = New-PSDrive -Name HKU -PSProvider Registry -Root HKEY_USERS
+        $Paths = Get-ChildItem 'HKU:\' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'S-1-5-21-[0-9]+-[0-9]+-[0-9]+-[0-9]+$' }
+
+$Brow = '['
+
+        ForEach($Path in $Paths) {
+
+            $User = ([System.Security.Principal.SecurityIdentifier] $Path.PSChildName).Translate( [System.Security.Principal.NTAccount]) | Select -ExpandProperty Value
+
+            $Path = $Path | Select-Object -ExpandProperty PSPath
+
+
+            $UserPath = "$Path\Software\Microsoft\Internet Explorer\TypedURLs"
+            if (-not (Test-Path -Path $UserPath)) {
+                Write-Verbose "[!] Could not find IE History for SID: $Path"
+            }
+            else {
+                Get-Item -Path $UserPath -ErrorAction SilentlyContinue | ForEach-Object {
+                    $Key = $_
+                    $Key.GetValueNames() | ForEach-Object {
+                        $Value = $Key.GetValue($_)
+                        $Brow += New-Object -TypeName PSObject -Property @{
+                            User = $UserName
+                            Browser = 'IE'
+                            DataType = 'History'
+                            Data = $Value
+                        } | convertto-json
+                        }
+                    }
+                }
+            }
+        
+
+$IEBrowserHistory = $Brow -replace '}','},' -replace '},$','}'
+$IEBrowserHistory += ']'
+Send-JsonOverTcp <logstash_ip> <logstash_port> "$IEBrowserHistory"
